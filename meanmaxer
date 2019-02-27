@@ -1,0 +1,16 @@
+'''
+This script will compute and save dimension-wise means and maxes for determining geometric features of projected subspaces.
+'''
+
+from os import listdir
+import numpy as np
+
+ftr = '/home/model/dimensions/'
+fme = open('/home/model/means.txt','w')
+fma = open('/home/model/maxes.txt','w')
+
+for f in listdir(ftr):
+    print(f)
+    dist = [float(x.split("::")[1]) for x in open(ftr+f,'r').readlines()]
+    fme.write(f.split(".")[0] + "::" + "%.6f" % np.mean(dist) + "\n")
+    fma.write(f.split(".")[0] + "::" + "%.6f" % max(dist) + "\n")

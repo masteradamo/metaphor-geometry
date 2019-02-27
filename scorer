@@ -1,0 +1,113 @@
+'''
+This script will return correlation scores for models built using features of subspaces projected using a dynamically contextual distributional semantic model.  It will find input files labelled according to the "wi", "di", and "me" parameters, as built by the "geometer script".  These csv files are expected to consist of one row of labels, and then subsequent rows in which the first two items are an object and a verb, the third, fourth, and fifth items are human judgements of metaphoricity, meaningfulness, and familiarity, and the subsequent rows are the geometric features of subspaces projected based on the verb-object dyad corresponding to that row.
+'''
+
+from sklearn.linear_model import LinearRegression as LR
+from scipy.stats import pearsonr as pears
+import  random
+import numpy as np
+
+ftr = '/home/data/'
+
+wi = ["5"] #co-occurrence window sizes
+di = ["200"] #dimensionalities
+me = ["Simp","Geom","Indy"] #subspace projection techniques
+targs = ["metaphoricity","meaningfulness","familiarity"] #semantic measures
+
+fac = 2 #variance inflation factor
+ext = 5 #depth of features to be returned when chosing top non-collinear features
+
+mod = LR()
+
+def dataer(name,targ):
+    ftr = open(name,'r').readlines()[:229]
+    labs = ftr[0].split(",")[6:]
+    dats = ftr[1:]
+    random.shuffle(dats)
+    yes = [float(x.split(",")[targ]) for x in dats]
+    xes = [[float(x) for x in y.split(",")[6:]] for y in dats]
+    pairs = [x.split(",")[:3] for x in dats]
+    return xes,yes,labs,pairs
+
+def viffer(stab,new,tolbs,lab,pt):
+    mod.fit(stab,new)
+    if 1/max(0.0001,(1-mod.score(stab,new))) < fac:
+        for n in range(len(stab)):
+            stab[n].append(new[n])
+        tolbs.append(lab)
+    pt += 1
+    return stab,tolbs,pt
+
+def topper(xes,yes,labs):
+    scores = [(labs[x],pears(yes,[y[x] for y in xes])[0]) for x in range(len(labs))]
+    choose = sorted(scores,key=lambda x: abs(x[1]),reverse=True)
+    tolbs = [choose[0][0]]
+    tolxs = [[xes[x][labs.index(choose[0][0])]] for x in range(len(xes))]
+    pt = 1
+    while len(tolbs) < ext and pt < len(labs):
+        new = [xes[x][labs.index(choose[pt][0])] for x in range(len(xes))]
+        tolxs,tolbs,pt = viffer(tolxs,new,tolbs,choose[pt][0],pt)
+    return tolxs,tolbs
+
+def looer(xes,yes):
+    preds = []
+    for n in range(len(yes)):
+        mod.fit(xes[:n]+xes[n+1:],yes[:n]+yes[n+1:])
+        preds.append(mod.predict(np.array(xes[n]).reshape(1,-1))[0])
+    return pears(preds,yes)[0],preds
+
+def coeffer(tolxs,yes,tolbs):
+    mod.fit(tolxs,yes)
+    return [(tolbs[x],"%.3f" % mod.coef_[x]) for x in range(len(tolbs))]
+
+def pairer(preds,pairs,full,phen):
+    paird = {}
+    phend = []
+    for n in range(len(preds)):
+        if pairs[n][0] not in full:
+            full[pairs[n][0]] = {}
+        if pairs[n][0] not in paird:
+            paird[pairs[n][0]] = {}
+        if pairs[n][1] not in full[pairs[n][0]]:
+            full[pairs[n][0]][pairs[n][1]] = {}
+        full[pairs[n][0]][pairs[n][1]][phen] = preds[n]
+        phend.append(preds[n])
+        paird[pairs[n][0]][pairs[n][2]] = pairs[n][1]
+    return full,paird,phend
+
+def writer(full,paird,phens):
+    ftw = open(ftr + 'output.txt','w')
+    for noun in full:
+        for tag in ["literal","conventional","novel"]:
+            verb = paird[noun][tag]
+            print("PHENS",phens)
+            ftw.write(" ".join([verb,noun]) + " - " + tag + ": " + ", ".join([x + " = " + "%.3f" % (1+(6*((full[noun][verb][x]-phens[x][1])/(phens[x][0]-phens[x][1])))) for x in ["metaphoricity","meaningfulness","familiarity"]]) + "\n")
+        ftw.write("\n")
+
+def ranker(full,paird):
+    for phen in ["metaphoricity","meaningfulness","familiarity"]:
+        hits = 0.0
+        for noun in full:
+            rank = sorted([(full[noun][paird[noun][x]][phen],x) for x in ["literal","conventional","novel"]])
+            if phen != "metaphoricity":
+                rank = sorted(rank,reverse=True)
+            hits += [x[1] for x in rank] == ["literal","conventional","novel"]
+        print(phen,hits/len(full))
+
+for wi in wins:
+    for di in dims:
+        for me in mets:
+            print(wi,di,me)
+            full = {}
+            phens = {}
+            for targ in [3,4,5]:
+                name = ftr+wi+"x"+di+"x"+me+"Norm.txt"
+                xes,yes,labs,pairs = dataer(name,targ)
+                tolxs,tolbs = topper(xes,yes,labs)
+                score,preds = looer(tolxs,yes)
+                colbs = coeffer(tolxs,yes,tolbs)
+                print(targs[targ-3],colbs,len(tolbs),score)
+                full,paird,phend = pairer(preds,pairs,full,targs[targ-3])
+                phens[targs[targ-3]] = [max(phend),min(phend)]
+            ranker(full,paird)
+            print()
